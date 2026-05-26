@@ -1,0 +1,50 @@
+project:
+  name: scorevision_midi
+  run_name: grandstaff_bekrn_crnn
+  seed: 42
+
+data:
+  data_root: data
+  train_partition: data/grandstaff_dataset/partitions/train.txt
+  val_partition: data/grandstaff_dataset/partitions/val.txt
+  test_partition: data/grandstaff_dataset/partitions/test.txt
+  extension: .bekrn
+  load_distorted: false
+  resize_ratio: 1.0
+
+vocab:
+  directory: outputs/vocab
+  name: grandstaff_bekrn
+  sort_tokens: false
+
+model:
+  name: CRNN
+  in_channels: 1
+  dropout: 0.4
+  pretrain_path: null
+  max_len: null
+  print_summary: true
+
+loss:
+  name: ctc
+  zero_infinity: false
+
+training:
+  batch_size: 1
+  num_workers: 20
+  max_epochs: 10000
+  learning_rate: 0.0001
+  log_every_n_steps: 50
+  early_stopping:
+    monitor: val_SER
+    min_delta: 0.01
+    patience: 5
+    mode: min
+
+logging:
+  level: INFO
+  log_dir: logs
+
+output:
+  root: outputs
+  write_predictions: true
