@@ -3,20 +3,28 @@ from __future__ import annotations
 import argparse
 import logging
 import random
+import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
-from torchinfo import summary as torch_summary
 from torch.utils.data import DataLoader
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.score_unfolding import build_model
 from utils.config import load_yaml_config, resolve_path
-from utils.data import GrandStaffDataset, ctc_collate
 from utils.logging import log_environment, setup_logging
 from utils.training import run_training
 from utils.vocabulary import load_or_create_vocabulary
+
+try:
+    from torchinfo import summary as torch_summary
+except ImportError:
+    torch_summary = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,12 +33,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-name", default=None, help="Override project.run_name.")
     parser.add_argument("--model-name", default=None, choices=["FCN", "CRNN", "CNNT"], help="Override model.name.")
     parser.add_argument("--max-epochs", type=int, default=None, help="Override training.max_epochs.")
+    parser.add_argument("--max-samples", type=int, default=None, help="Limit samples per split for smoke tests.")
+    parser.add_argument("--num-workers", type=int, default=None, help="Override training.num_workers.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = PROJECT_ROOT
     config = load_yaml_config(args.config)
     apply_cli_overrides(config, args)
 
@@ -49,10 +59,13 @@ def main() -> None:
     seed_everything(int(config["project"].get("seed", 42)))
 
     train_dataset, val_dataset, test_dataset = build_datasets(config, project_root, logger)
+    vocab_name = config["vocab"]["name"]
+    if config["data"].get("max_samples") is not None:
+        vocab_name = f"{vocab_name}_sample{int(config['data']['max_samples'])}"
     w2i, i2w = load_or_create_vocabulary(
         [train_dataset.get_gt(), val_dataset.get_gt(), test_dataset.get_gt()],
         vocab_dir=resolve_path(config["vocab"]["directory"], project_root),
-        name=config["vocab"]["name"],
+        name=vocab_name,
         sort_tokens=bool(config["vocab"].get("sort_tokens", False)),
         logger=logger,
     )
@@ -116,6 +129,10 @@ def apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> Non
         config["project"]["run_name"] = replace_model_suffix(config["project"]["run_name"], args.model_name)
     if args.max_epochs is not None:
         config["training"]["max_epochs"] = args.max_epochs
+    if getattr(args, "max_samples", None) is not None:
+        config["data"]["max_samples"] = args.max_samples
+    if getattr(args, "num_workers", None) is not None:
+        config["training"]["num_workers"] = args.num_workers
 
 
 def replace_model_suffix(run_name: str, model_name: str) -> str:
@@ -139,6 +156,8 @@ def build_datasets(
     project_root: Path,
     logger: logging.Logger,
 ) -> tuple[GrandStaffDataset, GrandStaffDataset, GrandStaffDataset]:
+    from utils.data import GrandStaffDataset
+
     data_cfg = config["data"]
     data_root = resolve_path(data_cfg["data_root"], project_root)
     common = {
@@ -146,6 +165,7 @@ def build_datasets(
         "resize_ratio": float(data_cfg["resize_ratio"]),
         "load_distorted": bool(data_cfg["load_distorted"]),
         "extension": data_cfg["extension"],
+        "max_samples": data_cfg.get("max_samples"),
         "logger": logger,
     }
 
@@ -170,6 +190,8 @@ def build_dataloaders(
     val_dataset: GrandStaffDataset,
     test_dataset: GrandStaffDataset,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
+    from utils.data import ctc_collate
+
     training_cfg = config["training"]
     num_workers = int(training_cfg["num_workers"])
     loader_kwargs = {
@@ -193,6 +215,10 @@ def maybe_log_model_summary(
     logger: logging.Logger,
 ) -> None:
     if not config["model"].get("print_summary", True):
+        return
+
+    if torch_summary is None:
+        logger.warning("Skipping model summary because torchinfo is not installed.")
         return
 
     input_size = (1, int(config["model"]["in_channels"]), max_height, max_width)
