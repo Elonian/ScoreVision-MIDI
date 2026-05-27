@@ -1,2 +1,7 @@
 data/
 works/
+*.pyc
+logs/*
+outputs/*
+!logs/.gitkeep
+!outputs/.gitkeep
