@@ -16,9 +16,21 @@ from modules.encoder import ScoreEncoder
 
 
 def compute_unfolded_length(height: int, width: int) -> int:
-    return (int(height) // ScoreEncoder.height_reduction) * (
-        int(width) // ScoreEncoder.width_reduction
-    )
+    encoded_height, encoded_width = compute_encoder_output_hw(height, width)
+    return encoded_height * encoded_width
+
+
+def compute_encoder_output_hw(height: int, width: int) -> tuple[int, int]:
+    encoded_height = int(height)
+    encoded_width = int(width)
+    for stride_h, stride_w in ((1, 1), (2, 2), (2, 2), (2, 2), (2, 1)):
+        encoded_height = _conv_stride_output(encoded_height, stride_h)
+        encoded_width = _conv_stride_output(encoded_width, stride_w)
+    return encoded_height, encoded_width
+
+
+def _conv_stride_output(size: int, stride: int) -> int:
+    return (int(size) + int(stride) - 1) // int(stride)
 
 
 class ScoreUnfoldingFCN(nn.Module):
@@ -160,11 +172,12 @@ def build_model(
             pretrain_path=pretrain_path,
         )
     if model_key == "STAVE_CNNT":
+        _, encoded_width = compute_encoder_output_hw(max_height, max_width)
         return StaveUnfoldingCNNT(
             in_channels=in_channels,
             out_categories=out_size,
             img_height=max_height,
-            max_len=max_width // ScoreEncoder.width_reduction,
+            max_len=encoded_width,
             dropout=dropout,
             pretrain_path=pretrain_path,
         )
