@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +48,10 @@ def run_training(
     best_epoch = 0
     epochs_without_improvement = 0
     max_epochs = int(training_cfg["max_epochs"])
+    training_started_at = time.perf_counter()
 
     for epoch in range(1, max_epochs + 1):
+        epoch_started_at = time.perf_counter()
         train_loss = _train_one_epoch(
             model=model,
             train_loader=train_loader,
@@ -59,14 +62,26 @@ def run_training(
             log_every_n_steps=int(training_cfg.get("log_every_n_steps", 50)),
         )
         val_cer, val_ser, val_ler = _evaluate(model, val_loader, i2w, blank_idx, device)
+        _synchronize_device(device)
+
+        epoch_seconds = time.perf_counter() - epoch_started_at
+        elapsed_seconds = time.perf_counter() - training_started_at
+        average_epoch_seconds = elapsed_seconds / epoch
+        eta_seconds = average_epoch_seconds * max(max_epochs - epoch, 0)
 
         logger.info(
-            "epoch=%s train_loss=%.6f val_CER=%.4f val_SER=%.4f val_LER=%.4f",
+            (
+                "epoch=%s train_loss=%.6f val_CER=%.4f val_SER=%.4f val_LER=%.4f "
+                "epoch_time=%s elapsed=%s eta_if_no_early_stop=%s"
+            ),
             epoch,
             train_loss,
             val_cer,
             val_ser,
             val_ler,
+            _format_duration(epoch_seconds),
+            _format_duration(elapsed_seconds),
+            _format_duration(eta_seconds),
         )
 
         monitored = {"val_CER": val_cer, "val_SER": val_ser, "val_LER": val_ler}[early_cfg["monitor"]]
@@ -118,11 +133,14 @@ def run_training(
         output_dir=output_dir,
         write_predictions=bool(config["output"].get("write_predictions", True)),
     )
+    _synchronize_device(device)
+    total_seconds = time.perf_counter() - training_started_at
     logger.info(
-        "test_CER=%.4f test_SER=%.4f test_LER=%.4f",
+        "test_CER=%.4f test_SER=%.4f test_LER=%.4f total_time=%s",
         test_metrics[0],
         test_metrics[1],
         test_metrics[2],
+        _format_duration(total_seconds),
     )
     return checkpoint_path, test_metrics
 
@@ -203,8 +221,8 @@ def _move_batch(
     return (
         images.to(device),
         targets.to(device),
-        input_lengths.to(device),
-        target_lengths.to(device),
+        input_lengths.cpu(),
+        target_lengths.cpu(),
     )
 
 
@@ -214,3 +232,20 @@ def _is_improved(current: float, best: float, min_delta: float, mode: str) -> bo
     if mode == "max":
         return current > best + min_delta
     raise ValueError(f"Unsupported early stopping mode: {mode}")
+
+
+def _synchronize_device(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = max(float(seconds), 0.0)
+    total_seconds = int(round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
