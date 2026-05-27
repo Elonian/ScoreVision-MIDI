@@ -50,7 +50,12 @@ class RecurrentScoreUnfolding(nn.Module):
 class TransformerScoreUnfolding(nn.Module):
     def __init__(self, out_categories: int, max_len: int) -> None:
         super().__init__()
-        self.pos_encoding = PositionalEncoding1D(dim=ENCODER_OUTPUT_CHANNELS, len_max=max_len)
+        self.dummy_param = nn.Parameter(torch.empty(0))
+        self.pos_encoding = PositionalEncoding1D(
+            dim=ENCODER_OUTPUT_CHANNELS,
+            len_max=max_len,
+            device=self.dummy_param.device,
+        )
         transformer_layer = nn.TransformerEncoderLayer(
             d_model=ENCODER_OUTPUT_CHANNELS,
             nhead=8,
@@ -111,9 +116,14 @@ class StaveTransformerDecoder(nn.Module):
     ) -> None:
         super().__init__()
         features = (img_height // height_reduction) * out_channels
+        self.dummy_param = nn.Parameter(torch.empty(0))
         self.reshape_features = features
         self.projection_layer = nn.Linear(features, ENCODER_OUTPUT_CHANNELS)
-        self.pos_encoding = PositionalEncoding1D(dim=ENCODER_OUTPUT_CHANNELS, len_max=max_len)
+        self.pos_encoding = PositionalEncoding1D(
+            dim=ENCODER_OUTPUT_CHANNELS,
+            len_max=max_len,
+            device=self.dummy_param.device,
+        )
         transformer_layer = nn.TransformerEncoderLayer(
             d_model=ENCODER_OUTPUT_CHANNELS,
             nhead=8,
