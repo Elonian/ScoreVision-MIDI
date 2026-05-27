@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import random
 import sys
 from pathlib import Path
@@ -9,7 +10,9 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,11 +23,7 @@ from utils.config import load_yaml_config, resolve_path
 from utils.logging import log_environment, setup_logging
 from utils.training import run_training
 from utils.vocabulary import load_or_create_vocabulary
-
-try:
-    from torchinfo import summary as torch_summary
-except ImportError:
-    torch_summary = None
+from torchinfo import summary as torch_summary
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,25 +33,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-name", default=None, choices=["FCN", "CRNN", "CNNT"], help="Override model.name.")
     parser.add_argument("--max-epochs", type=int, default=None, help="Override training.max_epochs.")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit samples per split for smoke tests.")
+    parser.add_argument("--batch-size", type=int, default=None, help="Override training.batch_size per process.")
     parser.add_argument("--num-workers", type=int, default=None, help="Override training.num_workers.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    distributed = init_distributed()
     project_root = PROJECT_ROOT
     config = load_yaml_config(args.config)
     apply_cli_overrides(config, args)
+    config["distributed"] = distributed
 
     run_name = config["project"]["run_name"]
     log_dir = resolve_path(config["logging"]["log_dir"], project_root)
     output_root = resolve_path(config["output"]["root"], project_root)
     output_dir = output_root / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "hyp").mkdir(parents=True, exist_ok=True)
-    (output_dir / "gt").mkdir(parents=True, exist_ok=True)
+    if distributed["is_main_process"]:
+        (output_dir / "hyp").mkdir(parents=True, exist_ok=True)
+        (output_dir / "gt").mkdir(parents=True, exist_ok=True)
 
-    logger, log_path = setup_logging(log_dir=log_dir, run_name=run_name, level=config["logging"]["level"])
+    log_run_name = run_name if distributed["is_main_process"] else f"{run_name}_rank{distributed['rank']}"
+    logger, log_path = setup_logging(log_dir=log_dir, run_name=log_run_name, level=config["logging"]["level"])
     log_environment(logger, config, output_dir=output_dir)
     logger.info("Training output directory: %s", output_dir)
 
@@ -62,30 +66,41 @@ def main() -> None:
     vocab_name = config["vocab"]["name"]
     if config["data"].get("max_samples") is not None:
         vocab_name = f"{vocab_name}_sample{int(config['data']['max_samples'])}"
-    w2i, i2w = load_or_create_vocabulary(
-        [train_dataset.get_gt(), val_dataset.get_gt(), test_dataset.get_gt()],
-        vocab_dir=resolve_path(config["vocab"]["directory"], project_root),
-        name=vocab_name,
-        sort_tokens=bool(config["vocab"].get("sort_tokens", False)),
+    w2i, i2w = load_or_create_vocabulary_distributed(
+        datasets=[train_dataset, val_dataset, test_dataset],
+        config=config,
+        vocab_name=vocab_name,
+        project_root=project_root,
         logger=logger,
     )
     for dataset in (train_dataset, val_dataset, test_dataset):
         dataset.set_dictionaries(w2i, i2w)
 
-    train_loader, val_loader, test_loader = build_dataloaders(config, train_dataset, val_dataset, test_dataset)
-    max_height, max_width = train_dataset.get_max_hw()
+    train_loader, val_loader, test_loader = build_dataloaders(
+        config,
+        train_dataset,
+        val_dataset,
+        test_dataset,
+        distributed,
+        logger,
+    )
+    model_name = config["model"]["name"].upper()
+    needs_max_hw = model_name in {"CNNT", "STAVE_CNNT"}
+    max_height, max_width = train_dataset.get_max_hw() if needs_max_hw else train_dataset.get_sample_hw(0)
     blank_idx = len(i2w)
     out_size = train_dataset.vocab_size() + 1
-    logger.info(
-        "Dataset sizes: train=%s val=%s test=%s vocab=%s blank_idx=%s max_hw=(%s,%s)",
-        len(train_dataset),
-        len(val_dataset),
-        len(test_dataset),
-        train_dataset.vocab_size(),
-        blank_idx,
-        max_height,
-        max_width,
-    )
+    if distributed["is_main_process"]:
+        logger.info(
+            "Dataset sizes: train=%s val=%s test=%s vocab=%s blank_idx=%s %s=(%s,%s)",
+            len(train_dataset),
+            len(val_dataset),
+            len(test_dataset),
+            train_dataset.vocab_size(),
+            blank_idx,
+            "max_hw" if needs_max_hw else "reference_hw",
+            max_height,
+            max_width,
+        )
 
     network = build_model(
         model_name=config["model"]["name"],
@@ -97,7 +112,8 @@ def main() -> None:
         max_len=config["model"].get("max_len"),
         pretrain_path=config["model"].get("pretrain_path"),
     )
-    maybe_log_model_summary(network, config, max_height, max_width, logger)
+    if distributed["is_main_process"]:
+        maybe_log_model_summary(network, config, max_height, max_width, logger)
 
     checkpoint_path, test_metrics = run_training(
         config=config,
@@ -111,14 +127,16 @@ def main() -> None:
         logger=logger,
     )
 
-    logger.info("Best checkpoint: %s", checkpoint_path)
-    logger.info(
-        "Finished training: test_CER=%.4f test_SER=%.4f test_LER=%.4f",
-        test_metrics[0],
-        test_metrics[1],
-        test_metrics[2],
-    )
+    if distributed["is_main_process"]:
+        logger.info("Best checkpoint: %s", checkpoint_path)
+        logger.info(
+            "Finished training: test_CER=%.4f test_SER=%.4f test_LER=%.4f",
+            test_metrics[0],
+            test_metrics[1],
+            test_metrics[2],
+        )
     logger.info("Log file: %s", log_path)
+    cleanup_distributed(distributed)
 
 
 def apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None:
@@ -131,6 +149,8 @@ def apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> Non
         config["training"]["max_epochs"] = args.max_epochs
     if getattr(args, "max_samples", None) is not None:
         config["data"]["max_samples"] = args.max_samples
+    if getattr(args, "batch_size", None) is not None:
+        config["training"]["batch_size"] = args.batch_size
     if getattr(args, "num_workers", None) is not None:
         config["training"]["num_workers"] = args.num_workers
 
@@ -151,6 +171,35 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def init_distributed() -> dict[str, Any]:
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    distributed = {
+        "enabled": world_size > 1,
+        "rank": rank,
+        "local_rank": local_rank,
+        "world_size": world_size,
+        "is_main_process": rank == 0,
+    }
+    if distributed["enabled"]:
+        if not torch.cuda.is_available():
+            raise RuntimeError("Distributed training was requested but CUDA is not available.")
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend="nccl")
+    return distributed
+
+
+def cleanup_distributed(distributed: dict[str, Any]) -> None:
+    if distributed.get("enabled") and dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def distributed_barrier(distributed: dict[str, Any]) -> None:
+    if distributed.get("enabled") and dist.is_initialized():
+        dist.barrier()
+
+
 def build_datasets(
     config: dict[str, Any],
     project_root: Path,
@@ -166,6 +215,8 @@ def build_datasets(
         "load_distorted": bool(data_cfg["load_distorted"]),
         "extension": data_cfg["extension"],
         "max_samples": data_cfg.get("max_samples"),
+        "preload_images": bool(data_cfg.get("preload_images", False)),
+        "image_cache_dir": resolve_path(data_cfg.get("image_cache_dir"), project_root),
         "logger": logger,
     }
 
@@ -184,24 +235,117 @@ def build_datasets(
     return train_dataset, val_dataset, test_dataset
 
 
+def load_or_create_vocabulary_distributed(
+    datasets: list[GrandStaffDataset],
+    config: dict[str, Any],
+    vocab_name: str,
+    project_root: Path,
+    logger: logging.Logger,
+) -> tuple[dict[str, int], dict[int, str]]:
+    distributed = config["distributed"]
+    vocab_dir = resolve_path(config["vocab"]["directory"], project_root)
+    sort_tokens = bool(config["vocab"].get("sort_tokens", False))
+
+    if distributed["is_main_process"]:
+        w2i, i2w = load_or_create_vocabulary(
+            [dataset.get_gt() for dataset in datasets],
+            vocab_dir=vocab_dir,
+            name=vocab_name,
+            sort_tokens=sort_tokens,
+            logger=logger,
+        )
+    distributed_barrier(distributed)
+    if not distributed["is_main_process"]:
+        w2i, i2w = load_or_create_vocabulary(
+            [dataset.get_gt() for dataset in datasets],
+            vocab_dir=vocab_dir,
+            name=vocab_name,
+            sort_tokens=sort_tokens,
+            logger=logger,
+        )
+    distributed_barrier(distributed)
+    return w2i, i2w
+
+
 def build_dataloaders(
     config: dict[str, Any],
     train_dataset: GrandStaffDataset,
     val_dataset: GrandStaffDataset,
     test_dataset: GrandStaffDataset,
+    distributed: dict[str, Any],
+    logger: logging.Logger,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
-    from utils.data import ctc_collate
+    from utils.data import LengthBucketBatchSampler, ctc_collate
 
     training_cfg = config["training"]
     num_workers = int(training_cfg["num_workers"])
-    loader_kwargs = {
-        "batch_size": int(training_cfg["batch_size"]),
+    batch_size = int(training_cfg["batch_size"])
+    use_bucketing = bool(training_cfg.get("bucket_by_length", False))
+    shuffle = bool(training_cfg.get("shuffle", False))
+    seed = int(config["project"].get("seed", 42))
+    common_loader_kwargs = {
         "num_workers": num_workers,
         "collate_fn": ctc_collate,
         "persistent_workers": num_workers > 0,
+        "pin_memory": torch.cuda.is_available(),
+    }
+    if use_bucketing:
+        rank = int(distributed.get("rank", 0)) if distributed.get("enabled") else 0
+        world_size = int(distributed.get("world_size", 1)) if distributed.get("enabled") else 1
+        train_batch_sampler = LengthBucketBatchSampler(
+            lengths=train_dataset.get_sample_heights(),
+            batch_size=batch_size,
+            rank=rank,
+            world_size=world_size,
+            shuffle=shuffle,
+            seed=seed,
+        )
+        val_batch_sampler = LengthBucketBatchSampler(
+            lengths=val_dataset.get_sample_heights(),
+            batch_size=batch_size,
+        )
+        test_batch_sampler = LengthBucketBatchSampler(
+            lengths=test_dataset.get_sample_heights(),
+            batch_size=batch_size,
+        )
+        logger.info(
+            (
+                "Using length-bucketed batches: train_batches=%s val_batches=%s test_batches=%s "
+                "batch_size=%s rank=%s world_size=%s"
+            ),
+            len(train_batch_sampler),
+            len(val_batch_sampler),
+            len(test_batch_sampler),
+            batch_size,
+            rank,
+            world_size,
+        )
+        return (
+            DataLoader(train_dataset, batch_sampler=train_batch_sampler, **common_loader_kwargs),
+            DataLoader(val_dataset, batch_sampler=val_batch_sampler, **common_loader_kwargs),
+            DataLoader(test_dataset, batch_sampler=test_batch_sampler, **common_loader_kwargs),
+        )
+
+    train_sampler = None
+    if distributed.get("enabled"):
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=int(distributed["world_size"]),
+            rank=int(distributed["rank"]),
+            shuffle=shuffle,
+            drop_last=False,
+        )
+    loader_kwargs = {
+        "batch_size": batch_size,
+        **common_loader_kwargs,
     }
     return (
-        DataLoader(train_dataset, shuffle=True, **loader_kwargs),
+        DataLoader(
+            train_dataset,
+            sampler=train_sampler,
+            shuffle=train_sampler is None and bool(training_cfg.get("shuffle", False)),
+            **loader_kwargs,
+        ),
         DataLoader(val_dataset, shuffle=False, **loader_kwargs),
         DataLoader(test_dataset, shuffle=False, **loader_kwargs),
     )
@@ -215,10 +359,6 @@ def maybe_log_model_summary(
     logger: logging.Logger,
 ) -> None:
     if not config["model"].get("print_summary", True):
-        return
-
-    if torch_summary is None:
-        logger.warning("Skipping model summary because torchinfo is not installed.")
         return
 
     input_size = (1, int(config["model"]["in_channels"]), max_height, max_width)
