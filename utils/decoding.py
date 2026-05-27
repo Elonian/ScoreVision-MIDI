@@ -8,6 +8,7 @@ import torch
 def greedy_decode_ctc(
     log_probs: torch.Tensor,
     targets: torch.Tensor,
+    input_lengths: torch.Tensor,
     target_lengths: torch.Tensor,
     i2w: dict[int, str],
     blank_idx: int,
@@ -17,7 +18,8 @@ def greedy_decode_ctc(
     batch_size = log_probs.size(1)
 
     for batch_idx in range(batch_size):
-        sample_probs = log_probs[:, batch_idx, :]
+        input_length = min(int(input_lengths[batch_idx]), int(log_probs.size(0)))
+        sample_probs = log_probs[:input_length, batch_idx, :]
         best_path = torch.argmax(sample_probs, dim=1)
         collapsed = [token for token, _ in groupby(best_path.detach().cpu().tolist())]
         decoded_ids = [int(token) for token in collapsed if int(token) != int(blank_idx)]
