@@ -1,5 +1,5 @@
-numpy
-opencv-python-headless
-PyYAML
-torch
-torchinfo
+numpy>=1.24
+opencv-python-headless>=4.8
+PyYAML>=6.0
+torch>=2.0
+torchinfo>=1.8

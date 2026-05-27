@@ -1,6 +1,6 @@
 project:
   name: scorevision_midi
-  run_name: grandstaff_bekrn_crnn
+  run_name: scorevision_grandstaff_bekrn_crnn_ddp_b12_bucketed
   seed: 42
 
 data:
@@ -10,6 +10,8 @@ data:
   test_partition: data/grandstaff_dataset/partitions/test.txt
   extension: .bekrn
   load_distorted: false
+  preload_images: false
+  image_cache_dir: outputs/image_cache/grandstaff_bekrn_plain
   resize_ratio: 1.0
 
 vocab:
@@ -30,8 +32,9 @@ loss:
   zero_infinity: false
 
 training:
-  batch_size: 1
-  num_workers: 20
+  batch_size: 12
+  num_workers: 4
+  bucket_by_length: true
   max_epochs: 10000
   learning_rate: 0.0001
   log_every_n_steps: 50
@@ -47,4 +50,5 @@ logging:
 
 output:
   root: outputs
+  save_epoch_checkpoints: true
   write_predictions: true
