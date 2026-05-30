@@ -315,7 +315,10 @@ def _unwrap_model(model: nn.Module) -> nn.Module:
 
 def _barrier(distributed: dict[str, Any]) -> None:
     if distributed.get("enabled") and dist.is_initialized():
-        dist.barrier()
+        if distributed.get("backend") == "nccl" and torch.cuda.is_available():
+            dist.barrier(device_ids=[int(distributed["local_rank"])])
+        else:
+            dist.barrier()
 
 
 def _reduce_mean(value: float, device: torch.device) -> float:
