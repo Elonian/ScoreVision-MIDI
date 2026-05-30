@@ -1,0 +1,56 @@
+project:
+  name: scorevision_midi
+  run_name: scorevision_grandstaff_bekrn_cnnt_ddp_b2
+  seed: 42
+
+data:
+  data_root: data
+  train_partition: data/grandstaff_dataset/partitions/train.txt
+  val_partition: data/grandstaff_dataset/partitions/val.txt
+  test_partition: data/grandstaff_dataset/partitions/test.txt
+  extension: .bekrn
+  load_distorted: false
+  preload_images: false
+  image_cache_dir: outputs/image_cache/grandstaff_bekrn_plain
+  metadata_cache_dir: outputs/metadata_cache/grandstaff_bekrn_plain
+  resize_ratio: 1.0
+  max_height: 3056
+  max_width: 256
+
+vocab:
+  directory: outputs/vocab
+  name: grandstaff_bekrn
+  sort_tokens: false
+
+model:
+  name: CNNT
+  in_channels: 1
+  dropout: 0.4
+  pretrain_path: null
+  print_summary: false
+
+loss:
+  name: ctc
+  zero_infinity: false
+
+training:
+  batch_size: 8
+  num_workers: 4
+  bucket_by_length: false
+  max_epochs: 10000
+  learning_rate: 0.0001
+  log_every_n_steps: 50
+  early_stopping:
+    monitor: val_SER
+    min_delta: 0.01
+    patience: 5
+    mode: min
+
+logging:
+  level: INFO
+  log_dir: logs
+
+output:
+  root: outputs
+  save_epoch_checkpoints: true
+  write_predictions: true
