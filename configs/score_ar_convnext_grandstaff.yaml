@@ -1,0 +1,70 @@
+project:
+  name: scorevision_midi
+  run_name: scorevision_grandstaff_bekrn_ar_convnext_scratch_ddp2_b16
+  seed: 42
+
+data:
+  data_root: data
+  train_partition: data/grandstaff_dataset/partitions/train.txt
+  val_partition: data/grandstaff_dataset/partitions/val.txt
+  test_partition: data/grandstaff_dataset/partitions/test.txt
+  extension: .bekrn
+  image_cache_dir: outputs/image_cache/grandstaff_bekrn_plain
+  resize_ratio: 1.0
+  max_height: 3056
+  max_width: 256
+  max_samples: null
+
+vocab:
+  directory: outputs/vocab
+  name: grandstaff_bekrn_reference_ar
+  sort_tokens: false
+
+model:
+  name: ConvNextScoreAutoregressive
+  in_channels: 1
+  d_model: 256
+  num_decoder_layers: 8
+  num_heads: 4
+  dim_feedforward: 256
+  decoder_dropout: 0.1
+  max_seq_len: 4096
+  encoder:
+    # Reference implementation initializes this ConvNeXt from scratch for 1-channel OMR images.
+    # Change source to "pretrained" only when you want to compare against ImageNet weights.
+    source: scratch
+    pretrained_model_name: facebook/convnext-tiny-224
+    cache_dir: cache_weights/convnext
+    local_files_only: false
+    freeze_encoder: false
+    scratch_hidden_sizes: [64, 128, 256]
+    scratch_depths: [3, 3, 9]
+
+loss:
+  name: sequence_cross_entropy
+
+training:
+  batch_size: 16
+  num_workers: 2
+  max_epochs: 10000
+  learning_rate: 0.0001
+  teacher_forcing_error_rate: 0.2
+  log_every_n_steps: 10
+  validation_every_n_epochs: 5
+  early_stopping:
+    monitor: val_SER
+    min_delta: 0.01
+    patience: 5
+    mode: min
+
+decoding:
+  max_length: 4096
+
+logging:
+  level: INFO
+  log_dir: logs
+
+output:
+  root: outputs
+  save_epoch_checkpoints: true
+  write_predictions: true

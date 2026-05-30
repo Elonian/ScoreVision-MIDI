@@ -1,0 +1,60 @@
+project:
+  name: scorevision_midi
+  run_name: scorevision_grandstaff_bekrn_ar_b2
+  seed: 42
+
+data:
+  data_root: data
+  train_partition: data/grandstaff_dataset/partitions/train.txt
+  val_partition: data/grandstaff_dataset/partitions/val.txt
+  test_partition: data/grandstaff_dataset/partitions/test.txt
+  extension: .bekrn
+  image_cache_dir: outputs/image_cache/grandstaff_bekrn_plain
+  resize_ratio: 1.0
+  max_height: 3056
+  max_width: 256
+  max_samples: null
+
+vocab:
+  directory: outputs/vocab
+  name: grandstaff_bekrn_ar
+  sort_tokens: false
+
+model:
+  name: ScoreAutoregressive
+  in_channels: 1
+  encoder_dropout: 0.2
+  decoder_dropout: 0.1
+  d_model: 256
+  num_decoder_layers: 6
+  num_heads: 4
+  dim_feedforward: 1024
+  max_seq_len: 4096
+
+loss:
+  name: sequence_cross_entropy
+
+training:
+  batch_size: 2
+  num_workers: 4
+  max_epochs: 200
+  learning_rate: 0.0001
+  teacher_forcing_error_rate: 0.2
+  log_every_n_steps: 50
+  early_stopping:
+    monitor: val_SER
+    min_delta: 0.01
+    patience: 8
+    mode: min
+
+decoding:
+  max_length: 4096
+
+logging:
+  level: INFO
+  log_dir: logs
+
+output:
+  root: outputs
+  save_epoch_checkpoints: true
+  write_predictions: true
