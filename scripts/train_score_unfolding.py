@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from models.score_unfolding import build_model
 from utils.config import load_yaml_config, resolve_path
 from utils.logging import log_environment, setup_logging
 from utils.training import run_training
-from utils.vocabulary import load_or_create_vocabulary
+from utils.vocabulary import load_or_create_vocabulary, vocabulary_paths
 from torchinfo import summary as torch_summary
 
 
@@ -86,7 +87,16 @@ def main() -> None:
     )
     model_name = config["model"]["name"].upper()
     needs_max_hw = model_name in {"CNNT", "STAVE_CNNT"}
-    max_height, max_width = train_dataset.get_max_hw() if needs_max_hw else train_dataset.get_sample_hw(0)
+    configured_max_height = config["data"].get("max_height")
+    configured_max_width = config["data"].get("max_width")
+    has_configured_max_hw = configured_max_height is not None and configured_max_width is not None
+    if needs_max_hw and has_configured_max_hw:
+        max_height, max_width = int(configured_max_height), int(configured_max_width)
+    elif needs_max_hw and distributed.get("enabled") and not distributed.get("is_main_process"):
+        _wait_for_dataset_hw_caches([train_dataset], logger)
+        max_height, max_width = train_dataset.get_max_hw()
+    else:
+        max_height, max_width = train_dataset.get_max_hw() if needs_max_hw else train_dataset.get_sample_hw(0)
     blank_idx = len(i2w)
     out_size = train_dataset.vocab_size() + 1
     if distributed["is_main_process"]:
@@ -181,12 +191,17 @@ def init_distributed() -> dict[str, Any]:
         "local_rank": local_rank,
         "world_size": world_size,
         "is_main_process": rank == 0,
+        "backend": os.environ.get("DIST_BACKEND", "nccl"),
     }
     if distributed["enabled"]:
         if not torch.cuda.is_available():
             raise RuntimeError("Distributed training was requested but CUDA is not available.")
-        torch.cuda.set_device(local_rank)
-        dist.init_process_group(backend="nccl")
+        device = torch.device("cuda", local_rank)
+        torch.cuda.set_device(device)
+        if distributed["backend"] == "nccl":
+            dist.init_process_group(backend="nccl", device_id=device)
+        else:
+            dist.init_process_group(backend=distributed["backend"])
     return distributed
 
 
@@ -197,7 +212,10 @@ def cleanup_distributed(distributed: dict[str, Any]) -> None:
 
 def distributed_barrier(distributed: dict[str, Any]) -> None:
     if distributed.get("enabled") and dist.is_initialized():
-        dist.barrier()
+        if distributed.get("backend") == "nccl" and torch.cuda.is_available():
+            dist.barrier(device_ids=[int(distributed["local_rank"])])
+        else:
+            dist.barrier()
 
 
 def build_datasets(
@@ -217,6 +235,7 @@ def build_datasets(
         "max_samples": data_cfg.get("max_samples"),
         "preload_images": bool(data_cfg.get("preload_images", False)),
         "image_cache_dir": resolve_path(data_cfg.get("image_cache_dir"), project_root),
+        "metadata_cache_dir": resolve_path(data_cfg.get("metadata_cache_dir"), project_root),
         "logger": logger,
     }
 
@@ -247,23 +266,35 @@ def load_or_create_vocabulary_distributed(
     sort_tokens = bool(config["vocab"].get("sort_tokens", False))
 
     if distributed["is_main_process"]:
-        w2i, i2w = load_or_create_vocabulary(
-            [dataset.get_gt() for dataset in datasets],
-            vocab_dir=vocab_dir,
-            name=vocab_name,
-            sort_tokens=sort_tokens,
-            logger=logger,
-        )
-    distributed_barrier(distributed)
-    if not distributed["is_main_process"]:
-        w2i, i2w = load_or_create_vocabulary(
-            [dataset.get_gt() for dataset in datasets],
-            vocab_dir=vocab_dir,
-            name=vocab_name,
-            sort_tokens=sort_tokens,
-            logger=logger,
-        )
-    distributed_barrier(distributed)
+        try:
+            w2i, i2w = load_or_create_vocabulary(
+                None,
+                vocab_dir=vocab_dir,
+                name=vocab_name,
+                sort_tokens=sort_tokens,
+                logger=logger,
+            )
+        except FileNotFoundError:
+            logger.info("Vocabulary is missing; reading all transcriptions to create it")
+            w2i, i2w = load_or_create_vocabulary(
+                [dataset.get_gt() for dataset in datasets],
+                vocab_dir=vocab_dir,
+                name=vocab_name,
+                sort_tokens=sort_tokens,
+                logger=logger,
+            )
+        logger.info("Vocabulary ready: size=%s", len(w2i))
+        return w2i, i2w
+
+    w2i_path, i2w_path = vocabulary_paths(vocab_dir, vocab_name)
+    _wait_for_paths([w2i_path, i2w_path], logger=logger, description="vocabulary files")
+    w2i, i2w = load_or_create_vocabulary(
+        None,
+        vocab_dir=vocab_dir,
+        name=vocab_name,
+        sort_tokens=sort_tokens,
+        logger=logger,
+    )
     return w2i, i2w
 
 
@@ -292,8 +323,14 @@ def build_dataloaders(
     if use_bucketing:
         rank = int(distributed.get("rank", 0)) if distributed.get("enabled") else 0
         world_size = int(distributed.get("world_size", 1)) if distributed.get("enabled") else 1
+        if distributed.get("enabled") and not distributed.get("is_main_process"):
+            _wait_for_dataset_hw_caches([train_dataset, val_dataset, test_dataset], logger)
+        logger.info("Collecting sample heights for length-bucketed batches")
+        train_heights = train_dataset.get_sample_heights()
+        val_heights = val_dataset.get_sample_heights()
+        test_heights = test_dataset.get_sample_heights()
         train_batch_sampler = LengthBucketBatchSampler(
-            lengths=train_dataset.get_sample_heights(),
+            lengths=train_heights,
             batch_size=batch_size,
             rank=rank,
             world_size=world_size,
@@ -301,11 +338,11 @@ def build_dataloaders(
             seed=seed,
         )
         val_batch_sampler = LengthBucketBatchSampler(
-            lengths=val_dataset.get_sample_heights(),
+            lengths=val_heights,
             batch_size=batch_size,
         )
         test_batch_sampler = LengthBucketBatchSampler(
-            lengths=test_dataset.get_sample_heights(),
+            lengths=test_heights,
             batch_size=batch_size,
         )
         logger.info(
@@ -349,6 +386,36 @@ def build_dataloaders(
         DataLoader(val_dataset, shuffle=False, **loader_kwargs),
         DataLoader(test_dataset, shuffle=False, **loader_kwargs),
     )
+
+
+def _wait_for_dataset_hw_caches(datasets: list[GrandStaffDataset], logger: logging.Logger) -> None:
+    cache_paths = []
+    for dataset in datasets:
+        cache_path = dataset.hw_cache_path()
+        if cache_path is not None:
+            cache_paths.append(cache_path)
+    if cache_paths:
+        _wait_for_paths(cache_paths, logger=logger, description="image-shape cache files")
+
+
+def _wait_for_paths(
+    paths: list[Path],
+    logger: logging.Logger,
+    description: str,
+    timeout_seconds: int = 3600,
+    poll_seconds: float = 2.0,
+) -> None:
+    started_at = time.monotonic()
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        logger.info("Waiting for %s: %s", description, ", ".join(str(path) for path in missing))
+    while missing:
+        if time.monotonic() - started_at > timeout_seconds:
+            raise TimeoutError(
+                f"Timed out waiting for {description}: {', '.join(str(path) for path in missing)}"
+            )
+        time.sleep(poll_seconds)
+        missing = [path for path in paths if not path.exists()]
 
 
 def maybe_log_model_summary(
