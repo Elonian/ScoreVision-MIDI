@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+import hashlib
 from pathlib import Path
 
 import cv2
@@ -58,6 +59,7 @@ class GrandStaffDataset(Dataset):
         max_samples: int | None = None,
         preload_images: bool = False,
         image_cache_dir: str | Path | None = None,
+        metadata_cache_dir: str | Path | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self.logger = logger or logging.getLogger(__name__)
@@ -68,9 +70,11 @@ class GrandStaffDataset(Dataset):
         self.extension = extension
         self.preload_images = bool(preload_images)
         self.image_cache_dir = Path(image_cache_dir) if image_cache_dir else None
-        self.samples: list[tuple[Path, list[str]]] = []
+        self.metadata_cache_dir = Path(metadata_cache_dir) if metadata_cache_dir else None
+        self.max_samples = max_samples
+        self.samples: list[tuple[Path, list[str] | None]] = []
         self.x: list[np.ndarray] = []
-        self.y: list[list[str]] = []
+        self.y: list[list[str] | None] = []
         self._sample_hw_cache: list[tuple[int, int]] | None = None
 
         if self.preload_images:
@@ -89,6 +93,7 @@ class GrandStaffDataset(Dataset):
                 data_root=self.data_root,
                 extension=self.extension,
                 max_samples=max_samples,
+                read_tokens=False,
                 logger=self.logger,
             )
             self.y = [tokens for _, tokens in self.samples]
@@ -97,7 +102,7 @@ class GrandStaffDataset(Dataset):
         self.i2w: dict[int, str] | None = None
         self.padding_token: int | None = None
 
-        if not self.y:
+        if len(self) == 0:
             raise RuntimeError(f"No samples loaded from partition file: {self.partition_file}")
 
     def __len__(self) -> int:
@@ -107,7 +112,7 @@ class GrandStaffDataset(Dataset):
         if self.w2i is None:
             raise RuntimeError("Dataset vocabulary is not set. Call set_dictionaries first.")
 
-        tokens = self.y[index]
+        tokens = self._get_tokens(index)
         if self.preload_images:
             image_array = self.x[index]
         else:
@@ -127,36 +132,129 @@ class GrandStaffDataset(Dataset):
             max_height = int(np.max([img.shape[0] for img in self.x]))
             return max_height, max_width
 
-        max_height = 0
-        max_width = 0
-        for index in range(len(self.samples)):
-            height, width = self.get_sample_hw(index)
-            max_height = max(max_height, height)
-            max_width = max(max_width, width)
+        sample_hw_cache = self._ensure_sample_hw_cache()
+        max_height = max(height for height, _ in sample_hw_cache)
+        max_width = max(width for _, width in sample_hw_cache)
         return max_height, max_width
 
     def get_sample_hw(self, index: int = 0) -> tuple[int, int]:
         if self._sample_hw_cache is not None:
             return self._sample_hw_cache[index]
-        if self.preload_images:
-            image = self.x[index]
-        else:
-            transcription_path, tokens = self.samples[index]
-            image = self._load_image_for_sample(transcription_path, len(tokens))
-        return int(image.shape[0]), int(image.shape[1])
+        return self._read_sample_hw(index)
 
     def get_sample_heights(self) -> list[int]:
+        return [height for height, _ in self._ensure_sample_hw_cache()]
+
+    def _ensure_sample_hw_cache(self) -> list[tuple[int, int]]:
         if self._sample_hw_cache is None:
-            self._sample_hw_cache = [self._read_sample_hw(index) for index in range(len(self))]
-        return [height for height, _ in self._sample_hw_cache]
+            cached_hw = self._load_hw_cache()
+            if cached_hw is not None:
+                self._sample_hw_cache = cached_hw
+                return self._sample_hw_cache
+
+            total = len(self)
+            self.logger.info(
+                "Reading cached image shapes for %s samples from %s",
+                total,
+                self.partition_file,
+            )
+            sample_hw_cache = []
+            for index in range(total):
+                sample_hw_cache.append(self._read_sample_hw(index))
+                if (index + 1) % 10000 == 0:
+                    self.logger.info(
+                        "Read cached image shapes %s/%s from %s",
+                        index + 1,
+                        total,
+                        self.partition_file,
+                    )
+            self._sample_hw_cache = sample_hw_cache
+            self._save_hw_cache(sample_hw_cache)
+        return self._sample_hw_cache
 
     def _read_sample_hw(self, index: int) -> tuple[int, int]:
         if self.preload_images:
             image = self.x[index]
-        else:
-            transcription_path, tokens = self.samples[index]
-            image = self._load_image_for_sample(transcription_path, len(tokens))
+            return int(image.shape[0]), int(image.shape[1])
+
+        transcription_path, _ = self.samples[index]
+        if self.image_cache_dir is not None:
+            cache_path = image_cache_path(
+                transcription_path=transcription_path,
+                data_root=self.data_root,
+                cache_dir=self.image_cache_dir,
+            )
+            if not cache_path.exists():
+                raise FileNotFoundError(
+                    f"Cached image not found: {cache_path}. "
+                    "Run scripts/prepare_image_cache.py before training or unset data.image_cache_dir."
+                )
+            image = np.load(cache_path, mmap_mode="r", allow_pickle=False)
+            return int(image.shape[0]), int(image.shape[1])
+
+        tokens = self._get_tokens(index)
+        image = self._load_image_for_sample(transcription_path, len(tokens))
         return int(image.shape[0]), int(image.shape[1])
+
+    def _get_tokens(self, index: int) -> list[str]:
+        tokens = self.y[index]
+        if tokens is None:
+            transcription_path, _ = self.samples[index]
+            tokens = _read_transcription_tokens(transcription_path)
+            self.y[index] = tokens
+            self.samples[index] = (transcription_path, tokens)
+        return tokens
+
+    def _ensure_all_tokens(self) -> list[list[str]]:
+        total = len(self)
+        token_samples = []
+        for index in range(total):
+            token_samples.append(self._get_tokens(index))
+            if (index + 1) % 10000 == 0:
+                self.logger.info(
+                    "Loaded tokens %s/%s from %s",
+                    index + 1,
+                    total,
+                    self.partition_file,
+                )
+        return token_samples
+
+    def _hw_cache_path(self) -> Path | None:
+        if self.metadata_cache_dir is None:
+            return None
+        cache_parts = [
+            str(self.partition_file.resolve()),
+            str(self.data_root.resolve()),
+            str(self.image_cache_dir.resolve() if self.image_cache_dir else None),
+            self.extension,
+            str(self.resize_ratio),
+            str(self.load_distorted),
+            str(self.max_samples),
+        ]
+        digest = hashlib.sha1("|".join(cache_parts).encode("utf-8")).hexdigest()[:16]
+        return self.metadata_cache_dir / f"{self.partition_file.stem}_{digest}_hw.npy"
+
+    def hw_cache_path(self) -> Path | None:
+        return self._hw_cache_path()
+
+    def _load_hw_cache(self) -> list[tuple[int, int]] | None:
+        cache_path = self._hw_cache_path()
+        if cache_path is None or not cache_path.exists():
+            return None
+        hw_array = np.load(cache_path, allow_pickle=False)
+        if int(hw_array.shape[0]) != len(self):
+            self.logger.warning("Ignoring stale image-shape cache: %s", cache_path)
+            return None
+        self.logger.info("Loaded image-shape cache from %s", cache_path)
+        return [(int(height), int(width)) for height, width in hw_array.tolist()]
+
+    def _save_hw_cache(self, sample_hw_cache: list[tuple[int, int]]) -> None:
+        cache_path = self._hw_cache_path()
+        if cache_path is None:
+            return
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(cache_path, np.asarray(sample_hw_cache, dtype=np.int32), allow_pickle=False)
+        self.logger.info("Saved image-shape cache to %s", cache_path)
 
     def _load_image_for_sample(self, transcription_path: Path, target_length: int) -> np.ndarray:
         if self.image_cache_dir is not None:
@@ -184,7 +282,7 @@ class GrandStaffDataset(Dataset):
         return image
 
     def get_max_seqlen(self) -> int:
-        return int(np.max([len(seq) for seq in self.y]))
+        return int(np.max([len(seq) for seq in self._ensure_all_tokens()]))
 
     def vocab_size(self) -> int:
         if self.w2i is None:
@@ -192,7 +290,7 @@ class GrandStaffDataset(Dataset):
         return len(self.w2i)
 
     def get_gt(self) -> list[list[str]]:
-        return self.y
+        return self._ensure_all_tokens()
 
     def set_dictionaries(self, w2i: dict[str, int], i2w: dict[int, str]) -> None:
         self.w2i = w2i
@@ -339,11 +437,14 @@ def load_transcription_samples(
     data_root: str | Path,
     extension: str = BEKRN_EXTENSION,
     max_samples: int | None = None,
+    read_tokens: bool = True,
+    validate_files: bool | None = None,
     logger: logging.Logger | None = None,
-) -> list[tuple[Path, list[str]]]:
+) -> list[tuple[Path, list[str] | None]]:
     logger = logger or logging.getLogger(__name__)
     partition_file = Path(partition_file)
     data_root = Path(data_root)
+    validate_files = read_tokens if validate_files is None else bool(validate_files)
 
     if not partition_file.exists():
         raise FileNotFoundError(f"Partition file not found: {partition_file}")
@@ -354,28 +455,38 @@ def load_transcription_samples(
     if max_samples is not None:
         part_lines = part_lines[: int(max_samples)]
 
+    action = "Loading" if read_tokens else "Indexing"
     logger.info(
-        "Loading %s transcriptions from %s (extension=%s, lazy_images=True)",
+        "%s %s transcriptions from %s (extension=%s, lazy_images=True, lazy_tokens=%s)",
+        action,
         len(part_lines),
         partition_file,
         extension,
+        not read_tokens,
     )
 
-    samples: list[tuple[Path, list[str]]] = []
+    samples: list[tuple[Path, list[str] | None]] = []
     skipped = 0
     for index, relative_path in enumerate(part_lines, start=1):
         transcription_path = _resolve_transcription_path(relative_path, data_root, extension)
-        if not transcription_path.exists():
+        if validate_files and not transcription_path.exists():
             skipped += 1
             logger.warning("Skipping missing transcription: %s", transcription_path)
             continue
 
-        samples.append((transcription_path, _read_transcription_tokens(transcription_path)))
+        tokens = _read_transcription_tokens(transcription_path) if read_tokens else None
+        samples.append((transcription_path, tokens))
 
-        if index % 10000 == 0:
+        if read_tokens and index % 10000 == 0:
             logger.info("Loaded %s/%s transcriptions", index, len(part_lines))
 
-    logger.info("Finished loading %s transcriptions from %s; skipped=%s", len(samples), partition_file, skipped)
+    logger.info(
+        "Finished %s %s transcriptions from %s; skipped=%s",
+        action.lower(),
+        len(samples),
+        partition_file,
+        skipped,
+    )
     return samples
 
 
