@@ -67,4 +67,6 @@ logging:
 output:
   root: outputs
   save_epoch_checkpoints: true
+  save_latest_checkpoint: true
+  latest_checkpoint_every_n_steps: 100
   write_predictions: true
