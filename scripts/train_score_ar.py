@@ -39,17 +39,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=None, help="Override training.batch_size.")
     parser.add_argument("--num-workers", type=int, default=None, help="Override training.num_workers.")
     parser.add_argument("--max-decode-length", type=int, default=None, help="Override decoding.max_length.")
+    parser.add_argument(
+        "--resume-checkpoint",
+        default=None,
+        help="Resume from a checkpoint path. Relative paths are resolved from the project root.",
+    )
+    parser.add_argument(
+        "--auto-resume",
+        action="store_true",
+        help="Resume from latest.pt or the latest epoch_*.pt checkpoint in the run output directory.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     distributed = init_distributed()
+    project_root = PROJECT_ROOT
     config = load_yaml_config(args.config)
-    apply_cli_overrides(config, args)
+    apply_cli_overrides(config, args, project_root)
     config["distributed"] = distributed
 
-    project_root = PROJECT_ROOT
     run_name = config["project"]["run_name"]
     log_dir = resolve_path(config["logging"]["log_dir"], project_root)
     output_root = resolve_path(config["output"]["root"], project_root)
@@ -115,7 +125,7 @@ def main() -> None:
     cleanup_distributed(distributed)
 
 
-def apply_cli_overrides(config: dict, args: argparse.Namespace) -> None:
+def apply_cli_overrides(config: dict, args: argparse.Namespace, project_root: Path) -> None:
     if args.run_name:
         config["project"]["run_name"] = args.run_name
     if args.max_epochs is not None:
@@ -128,6 +138,11 @@ def apply_cli_overrides(config: dict, args: argparse.Namespace) -> None:
         config["training"]["num_workers"] = args.num_workers
     if args.max_decode_length is not None:
         config["decoding"]["max_length"] = args.max_decode_length
+    resume_cfg = config["training"].setdefault("resume", {})
+    if args.resume_checkpoint is not None:
+        resume_cfg["checkpoint"] = str(resolve_path(args.resume_checkpoint, project_root))
+    if args.auto_resume:
+        resume_cfg["auto"] = True
 
 
 def build_datasets(config: dict, project_root: Path, logger: logging.Logger):
