@@ -36,6 +36,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-samples", type=int, default=None, help="Limit samples per split for smoke tests.")
     parser.add_argument("--batch-size", type=int, default=None, help="Override training.batch_size per process.")
     parser.add_argument("--num-workers", type=int, default=None, help="Override training.num_workers.")
+    parser.add_argument(
+        "--resume-checkpoint",
+        default=None,
+        help="Resume from a checkpoint path. Relative paths are resolved from the project root.",
+    )
+    parser.add_argument(
+        "--auto-resume",
+        action="store_true",
+        help="Resume from the latest epoch_*.pt checkpoint in the run output directory.",
+    )
     return parser.parse_args()
 
 
@@ -44,7 +54,7 @@ def main() -> None:
     distributed = init_distributed()
     project_root = PROJECT_ROOT
     config = load_yaml_config(args.config)
-    apply_cli_overrides(config, args)
+    apply_cli_overrides(config, args, project_root)
     config["distributed"] = distributed
 
     run_name = config["project"]["run_name"]
@@ -149,7 +159,7 @@ def main() -> None:
     cleanup_distributed(distributed)
 
 
-def apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None:
+def apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace, project_root: Path) -> None:
     if args.run_name:
         config["project"]["run_name"] = args.run_name
     if args.model_name:
@@ -163,6 +173,11 @@ def apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> Non
         config["training"]["batch_size"] = args.batch_size
     if getattr(args, "num_workers", None) is not None:
         config["training"]["num_workers"] = args.num_workers
+    resume_cfg = config["training"].setdefault("resume", {})
+    if getattr(args, "resume_checkpoint", None) is not None:
+        resume_cfg["checkpoint"] = str(resolve_path(args.resume_checkpoint, project_root))
+    if getattr(args, "auto_resume", False):
+        resume_cfg["auto"] = True
 
 
 def replace_model_suffix(run_name: str, model_name: str) -> str:
