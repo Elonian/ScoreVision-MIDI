@@ -36,7 +36,8 @@ def run_training(
     is_main_process = bool(distributed.get("is_main_process", True))
     if is_main_process:
         weights_dir.mkdir(parents=True, exist_ok=True)
-    best_checkpoint_path: Path | None = None
+    existing_best_path = weights_dir / "best.pt"
+    best_checkpoint_path: Path | None = existing_best_path if existing_best_path.exists() else None
 
     if is_distributed:
         device = torch.device(f"cuda:{int(distributed['local_rank'])}")
@@ -75,9 +76,50 @@ def run_training(
     best_epoch = 0
     epochs_without_improvement = 0
     max_epochs = int(training_cfg["max_epochs"])
+    start_epoch = 1
+
+    resume_checkpoint_path = _select_resume_checkpoint(training_cfg, weights_dir)
+    if resume_checkpoint_path is not None:
+        checkpoint = torch.load(resume_checkpoint_path, map_location=device)
+        _unwrap_model(model).load_state_dict(checkpoint["model_state_dict"])
+        if "optimizer_state_dict" not in checkpoint:
+            raise KeyError(f"Checkpoint {resume_checkpoint_path} does not contain optimizer_state_dict")
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        _move_optimizer_state_to_device(optimizer, device)
+
+        resume_epoch = int(checkpoint["epoch"])
+        best_metadata, resume_best_checkpoint_path = _best_metadata_for_resume(
+            checkpoint=checkpoint,
+            best_checkpoint_path=existing_best_path,
+            resume_epoch=resume_epoch,
+        )
+        best_epoch = int(best_metadata.get("best_epoch") or best_metadata.get("epoch") or 0)
+        best_metric = float(best_metadata.get("best_metric", best_metadata.get("monitored_metric", best_metric)))
+        epochs_without_improvement = int(
+            checkpoint.get("epochs_without_improvement", max(resume_epoch - best_epoch, 0))
+        )
+        start_epoch = resume_epoch + 1
+        best_checkpoint_path = resume_best_checkpoint_path or resume_checkpoint_path
+        if is_main_process:
+            logger.info(
+                (
+                    "Resuming training from %s at epoch=%s; next_epoch=%s "
+                    "best_epoch=%s best_metric=%.6f epochs_without_improvement=%s/%s"
+                ),
+                resume_checkpoint_path,
+                resume_epoch,
+                start_epoch,
+                best_epoch,
+                best_metric,
+                epochs_without_improvement,
+                int(early_cfg["patience"]),
+            )
+    elif bool((training_cfg.get("resume") or {}).get("auto", False)) and is_main_process:
+        logger.info("Auto-resume requested, but no epoch checkpoint was found in %s", weights_dir)
+
     training_started_at = time.perf_counter()
 
-    for epoch in range(1, max_epochs + 1):
+    for epoch in range(start_epoch, max_epochs + 1):
         epoch_started_at = time.perf_counter()
         if hasattr(train_loader.sampler, "set_epoch"):
             train_loader.sampler.set_epoch(epoch)
@@ -104,7 +146,8 @@ def run_training(
         if is_main_process:
             epoch_seconds = time.perf_counter() - epoch_started_at
             elapsed_seconds = time.perf_counter() - training_started_at
-            average_epoch_seconds = elapsed_seconds / epoch
+            completed_epochs_this_run = max(epoch - start_epoch + 1, 1)
+            average_epoch_seconds = elapsed_seconds / completed_epochs_this_run
             eta_seconds = average_epoch_seconds * max(max_epochs - epoch, 0)
 
             logger.info(
@@ -123,6 +166,14 @@ def run_training(
             )
 
             monitored = {"val_CER": val_cer, "val_SER": val_ser, "val_LER": val_ler}[early_cfg["monitor"]]
+            improved = _is_improved(monitored, best_metric, float(early_cfg["min_delta"]), early_cfg["mode"])
+            if improved:
+                best_metric = monitored
+                best_epoch = epoch
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+
             checkpoint_payload = {
                 "epoch": epoch,
                 "model_state_dict": _unwrap_model(model).state_dict(),
@@ -138,23 +189,18 @@ def run_training(
                 "monitored_metric": monitored,
                 "best_epoch": best_epoch,
                 "best_metric": best_metric,
+                "epochs_without_improvement": epochs_without_improvement,
             }
             if bool(config.get("output", {}).get("save_epoch_checkpoints", True)):
                 epoch_checkpoint_path = weights_dir / f"epoch_{epoch:04d}.pt"
                 torch.save(checkpoint_payload, epoch_checkpoint_path)
                 logger.info("Saved epoch checkpoint to %s", epoch_checkpoint_path)
 
-            if _is_improved(monitored, best_metric, float(early_cfg["min_delta"]), early_cfg["mode"]):
-                best_metric = monitored
-                best_epoch = epoch
-                epochs_without_improvement = 0
-                checkpoint_payload["best_epoch"] = best_epoch
-                checkpoint_payload["best_metric"] = best_metric
+            if improved:
                 best_checkpoint_path = weights_dir / "best.pt"
                 torch.save(checkpoint_payload, best_checkpoint_path)
                 logger.info("Saved best checkpoint to %s", best_checkpoint_path)
             else:
-                epochs_without_improvement += 1
                 logger.info(
                     "No %s improvement for %s/%s epochs",
                     early_cfg["monitor"],
@@ -300,6 +346,57 @@ def _is_improved(current: float, best: float, min_delta: float, mode: str) -> bo
     if mode == "max":
         return current > best + min_delta
     raise ValueError(f"Unsupported early stopping mode: {mode}")
+
+
+def _select_resume_checkpoint(training_cfg: dict[str, Any], weights_dir: Path) -> Path | None:
+    resume_cfg = training_cfg.get("resume") or {}
+    explicit_checkpoint = resume_cfg.get("checkpoint") or training_cfg.get("resume_checkpoint")
+    if explicit_checkpoint:
+        checkpoint_path = Path(str(explicit_checkpoint)).expanduser()
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Resume checkpoint does not exist: {checkpoint_path}")
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Resume checkpoint is not a file: {checkpoint_path}")
+        return checkpoint_path
+
+    auto_resume = bool(resume_cfg.get("auto", False) or training_cfg.get("auto_resume", False))
+    if auto_resume:
+        return _latest_epoch_checkpoint(weights_dir)
+    return None
+
+
+def _latest_epoch_checkpoint(weights_dir: Path) -> Path | None:
+    latest_epoch = -1
+    latest_path: Path | None = None
+    for path in weights_dir.glob("epoch_*.pt"):
+        try:
+            epoch = int(path.stem.rsplit("_", maxsplit=1)[1])
+        except (IndexError, ValueError):
+            continue
+        if epoch > latest_epoch:
+            latest_epoch = epoch
+            latest_path = path
+    return latest_path
+
+
+def _best_metadata_for_resume(
+    checkpoint: dict[str, Any],
+    best_checkpoint_path: Path,
+    resume_epoch: int,
+) -> tuple[dict[str, Any], Path | None]:
+    if best_checkpoint_path.exists():
+        best_checkpoint = torch.load(best_checkpoint_path, map_location="cpu")
+        best_epoch = int(best_checkpoint.get("best_epoch") or best_checkpoint.get("epoch") or 0)
+        if 0 < best_epoch <= resume_epoch:
+            return best_checkpoint, best_checkpoint_path
+    return checkpoint, None
+
+
+def _move_optimizer_state_to_device(optimizer: optim.Optimizer, device: torch.device) -> None:
+    for state in optimizer.state.values():
+        for key, value in state.items():
+            if isinstance(value, torch.Tensor):
+                state[key] = value.to(device)
 
 
 def _synchronize_device(device: torch.device) -> None:
