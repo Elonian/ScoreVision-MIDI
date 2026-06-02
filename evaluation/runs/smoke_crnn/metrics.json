@@ -1,0 +1,20 @@
+[
+  {
+    "cer": 3.4216335540838854,
+    "checkpoint": "outputs/scorevision_grandstaff_bekrn_crnn_ddp_b12_bucketed/weights/best.pt",
+    "checkpoint_best_epoch": 81,
+    "checkpoint_best_metric": 5.810879993932384,
+    "checkpoint_epoch": 81,
+    "elapsed_seconds": 10.271760103998531,
+    "gt_dir": "evaluation/runs/smoke_crnn/gt",
+    "hyp_dir": "evaluation/runs/smoke_crnn/hyp",
+    "ler": 19.148936170212767,
+    "metrics_json": null,
+    "model": "CRNN",
+    "run_name": "scorevision_grandstaff_bekrn_crnn_ddp_b12_bucketed",
+    "samples": 2,
+    "ser": 5.3418803418803416,
+    "source": "checkpoint_inference",
+    "split": "test"
+  }
+]

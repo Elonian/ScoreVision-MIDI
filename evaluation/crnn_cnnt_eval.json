@@ -1,0 +1,32 @@
+[
+  {
+    "model": "CRNN",
+    "run_name": "scorevision_grandstaff_bekrn_crnn_ddp_b12_bucketed",
+    "split": "test",
+    "samples": 7661,
+    "cer": 4.2383,
+    "ser": 7.0236,
+    "ler": 18.6882,
+    "checkpoint": "outputs/scorevision_grandstaff_bekrn_crnn_ddp_b12_bucketed/weights/best.pt",
+    "best_epoch": 81,
+    "final_epoch": 86,
+    "hyp_files": 7661,
+    "gt_files": 7661,
+    "source_log": "logs/scorevision_grandstaff_bekrn_crnn_ddp_b12_bucketed_20260530_203444.log"
+  },
+  {
+    "model": "CNNT",
+    "run_name": "scorevision_grandstaff_bekrn_cnnt_ddp_b2",
+    "split": "test",
+    "samples": 7661,
+    "cer": 3.8116,
+    "ser": 6.2293,
+    "ler": 16.0543,
+    "checkpoint": "outputs/scorevision_grandstaff_bekrn_cnnt_ddp_b2/weights/best.pt",
+    "best_epoch": 70,
+    "final_epoch": 75,
+    "hyp_files": 7661,
+    "gt_files": 7661,
+    "source_log": "logs/scorevision_grandstaff_bekrn_cnnt_ddp_b2_20260530_030814.log"
+  }
+]
