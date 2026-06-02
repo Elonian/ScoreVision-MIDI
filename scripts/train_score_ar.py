@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import sys
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 
@@ -249,6 +250,7 @@ def init_distributed() -> dict:
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    timeout_seconds = int(os.environ.get("DIST_TIMEOUT_SECONDS", "21600"))
     distributed = {
         "enabled": world_size > 1,
         "rank": rank,
@@ -256,16 +258,18 @@ def init_distributed() -> dict:
         "world_size": world_size,
         "is_main_process": rank == 0,
         "backend": os.environ.get("DIST_BACKEND", "nccl"),
+        "timeout_seconds": timeout_seconds,
     }
     if distributed["enabled"]:
         if not torch.cuda.is_available():
             raise RuntimeError("Distributed training was requested but CUDA is not available.")
         device = torch.device("cuda", local_rank)
         torch.cuda.set_device(device)
+        timeout = timedelta(seconds=timeout_seconds)
         if distributed["backend"] == "nccl":
-            dist.init_process_group(backend="nccl", device_id=device)
+            dist.init_process_group(backend="nccl", device_id=device, timeout=timeout)
         else:
-            dist.init_process_group(backend=distributed["backend"])
+            dist.init_process_group(backend=distributed["backend"], timeout=timeout)
     return distributed
 
 

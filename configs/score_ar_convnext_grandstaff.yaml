@@ -59,6 +59,7 @@ training:
 
 decoding:
   max_length: 4096
+  length_margin: 32
 
 logging:
   level: INFO

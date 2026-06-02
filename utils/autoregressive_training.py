@@ -212,6 +212,14 @@ def run_autoregressive_training(
 
         _barrier(distributed)
         if is_main_process:
+            validation_started_at = time.perf_counter()
+            logger.info(
+                "Starting autoregressive validation epoch=%s batches=%s max_length=%s length_margin=%s",
+                epoch,
+                len(val_loader),
+                int(config["decoding"]["max_length"]),
+                int(config["decoding"].get("length_margin", 32)),
+            )
             val_cer, val_ser, val_ler = evaluate_autoregressive(
                 model=_unwrap_model(model),
                 loader=val_loader,
@@ -219,19 +227,26 @@ def run_autoregressive_training(
                 bos_idx=w2i[BOS_TOKEN],
                 eos_idx=w2i[EOS_TOKEN],
                 max_length=int(config["decoding"]["max_length"]),
+                length_margin=int(config["decoding"].get("length_margin", 32)),
                 device=device,
             )
+            validation_seconds = time.perf_counter() - validation_started_at
             logger.info(
-                "epoch=%s train_loss=%.6f val_CER=%.4f val_SER=%.4f val_LER=%.4f epoch_time=%s elapsed=%s",
+                (
+                    "epoch=%s train_loss=%.6f val_CER=%.4f val_SER=%.4f val_LER=%.4f "
+                    "validation_time=%s epoch_time=%s elapsed=%s"
+                ),
                 epoch,
                 train_loss,
                 val_cer,
                 val_ser,
                 val_ler,
+                _format_duration(validation_seconds),
                 _format_duration(epoch_seconds),
                 _format_duration(elapsed_seconds),
             )
         else:
+            logger.info("Waiting for rank 0 autoregressive validation at epoch=%s", epoch)
             val_cer, val_ser, val_ler = 0.0, 0.0, 0.0
 
         should_stop = False
@@ -296,6 +311,7 @@ def run_autoregressive_training(
             bos_idx=w2i[BOS_TOKEN],
             eos_idx=w2i[EOS_TOKEN],
             max_length=int(config["decoding"]["max_length"]),
+            length_margin=int(config["decoding"].get("length_margin", 32)),
             device=device,
             output_dir=output_dir,
             write_predictions=bool(config["output"].get("write_predictions", True)),
@@ -356,6 +372,7 @@ def evaluate_autoregressive(
     bos_idx: int,
     eos_idx: int,
     max_length: int,
+    length_margin: int,
     device: torch.device,
     output_dir: Path | None = None,
     write_predictions: bool = False,
@@ -371,7 +388,9 @@ def evaluate_autoregressive(
 
     for batch_idx, batch in enumerate(loader):
         images, _, labels, lengths = _move_batch(batch, device)
-        generated = model.generate(images, bos_idx=bos_idx, eos_idx=eos_idx, max_length=max_length)
+        reference_max_length = int(lengths.detach().max().cpu())
+        batch_max_length = min(int(max_length), reference_max_length + max(int(length_margin), 0))
+        generated = model.generate(images, bos_idx=bos_idx, eos_idx=eos_idx, max_length=batch_max_length)
         for sample_idx in range(images.size(0)):
             pred_tokens = _ids_to_tokens(generated[sample_idx].detach().cpu().tolist(), i2w)
             label_length = int(lengths[sample_idx].detach().cpu())
