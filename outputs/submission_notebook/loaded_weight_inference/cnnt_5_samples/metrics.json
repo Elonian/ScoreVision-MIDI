@@ -1,0 +1,20 @@
+[
+  {
+    "cer": 3.7781350482315115,
+    "checkpoint": "/mntdatalora/src/ScoreVision-MIDI/outputs/scorevision_grandstaff_bekrn_cnnt_ddp_b2/weights/best.pt",
+    "checkpoint_best_epoch": 70,
+    "checkpoint_best_metric": 5.162687953886119,
+    "checkpoint_epoch": 70,
+    "elapsed_seconds": 6.330307461001212,
+    "gt_dir": "/mntdatalora/src/ScoreVision-MIDI/outputs/submission_notebook/loaded_weight_inference/cnnt_5_samples/gt",
+    "hyp_dir": "/mntdatalora/src/ScoreVision-MIDI/outputs/submission_notebook/loaded_weight_inference/cnnt_5_samples/hyp",
+    "ler": 20.717131474103585,
+    "metrics_json": "/mntdatalora/src/ScoreVision-MIDI/outputs/submission_notebook/loaded_weight_inference/cnnt_5_samples/metrics.json",
+    "model": "CNNT",
+    "run_name": "scorevision_grandstaff_bekrn_cnnt_ddp_b2",
+    "samples": 5,
+    "ser": 5.790297339593114,
+    "source": "checkpoint_inference",
+    "split": "test"
+  }
+]

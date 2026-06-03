@@ -194,8 +194,8 @@ def evaluate_checkpoint(
         elapsed_seconds=elapsed_seconds,
     )
     metrics_json = output_dir / "metrics.json"
-    write_results_json([result], metrics_json)
     result.metrics_json = str(metrics_json)
+    write_results_json([result], metrics_json)
     logger.info(
         "%s %s: CER=%.4f SER=%.4f LER=%.4f samples=%s elapsed=%.1fs",
         model_name,

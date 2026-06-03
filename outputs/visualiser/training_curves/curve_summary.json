@@ -1,0 +1,30 @@
+{
+  "CNNT": {
+    "best_epoch": 70,
+    "best_val_SER": 5.162688,
+    "final_epoch": 75,
+    "final_val_CER": 3.3114,
+    "final_val_LER": 11.7589,
+    "final_val_SER": 5.2014,
+    "fresh_test": {
+      "cer": 3.9117176542744936,
+      "ler": 16.351707025636333,
+      "ser": 6.362267614136914
+    },
+    "stop_epoch": 75
+  },
+  "CRNN": {
+    "best_epoch": 81,
+    "best_val_SER": 5.81088,
+    "final_epoch": 86,
+    "final_val_CER": 3.6622,
+    "final_val_LER": 14.1588,
+    "final_val_SER": 5.8376,
+    "fresh_test": {
+      "cer": 4.36779550763607,
+      "ler": 19.103185837850056,
+      "ser": 7.203572760249251
+    },
+    "stop_epoch": 86
+  }
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "cer": 3.9117176542744936,
+    "checkpoint": "outputs/scorevision_grandstaff_bekrn_cnnt_ddp_b2/weights/best.pt",
+    "checkpoint_best_epoch": 70,
+    "checkpoint_best_metric": 5.162687953886119,
+    "checkpoint_epoch": 70,
+    "elapsed_seconds": 793.8226444399988,
+    "gt_dir": "evaluation/runs/cnnt_test/gt",
+    "hyp_dir": "evaluation/runs/cnnt_test/hyp",
+    "ler": 16.351707025636333,
+    "metrics_json": "evaluation/runs/cnnt_test/metrics.json",
+    "model": "CNNT",
+    "run_name": "scorevision_grandstaff_bekrn_cnnt_ddp_b2",
+    "samples": 7661,
+    "ser": 6.362267614136914,
+    "source": "checkpoint_inference",
+    "split": "test"
+  }
+]

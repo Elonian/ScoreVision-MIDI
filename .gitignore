@@ -3,5 +3,15 @@ works/
 *.pyc
 logs/*
 outputs/*
+papers/*
+evaluation/runs/*/hyp/
+evaluation/runs/*/gt/
 !logs/.gitkeep
 !outputs/.gitkeep
+!outputs/visualiser/
+!outputs/visualiser/**
+!outputs/submission_notebook/
+!outputs/submission_notebook/five_test_examples/
+!outputs/submission_notebook/five_test_examples/**
+!outputs/submission_notebook/loaded_weight_inference/
+!outputs/submission_notebook/loaded_weight_inference/**

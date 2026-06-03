@@ -1,0 +1,614 @@
+{
+  "composer_counts": {
+    "beethoven": {
+      "test": 3467,
+      "train": 19123,
+      "val": 2130
+    },
+    "chopin": {
+      "test": 955,
+      "train": 4995,
+      "val": 585
+    },
+    "hummel": {
+      "test": 31,
+      "train": 169,
+      "val": 18
+    },
+    "joplin": {
+      "test": 778,
+      "train": 4187,
+      "val": 459
+    },
+    "mozart": {
+      "test": 1144,
+      "train": 6249,
+      "val": 655
+    },
+    "scarlatti-d": {
+      "test": 1286,
+      "train": 6875,
+      "val": 776
+    }
+  },
+  "data_root": "/mntdatalora/src/ScoreVision-MIDI/data",
+  "image_cache_dir": "/mntdatalora/src/ScoreVision-MIDI/outputs/image_cache/grandstaff_bekrn_plain",
+  "output_dir": "/mntdatalora/src/ScoreVision-MIDI/outputs/visualiser/data_preprocessing",
+  "partition_files": {
+    "test": "/mntdatalora/src/ScoreVision-MIDI/data/grandstaff_dataset/partitions/test.txt",
+    "train": "/mntdatalora/src/ScoreVision-MIDI/data/grandstaff_dataset/partitions/train.txt",
+    "val": "/mntdatalora/src/ScoreVision-MIDI/data/grandstaff_dataset/partitions/val.txt"
+  },
+  "preprocessing": {
+    "ctc_input_length": "(cached_width // 8) * (cached_height // 16)",
+    "grayscale": true,
+    "image_source": "clean .jpg files",
+    "load_distorted": false,
+    "resize_ratio": 1.0,
+    "rotation": "90 degrees clockwise",
+    "tensor_normalization": "float32 image / 255.0",
+    "tokens": {
+      "line_break": "<b>",
+      "space": "<s>",
+      "tab": "<t>"
+    },
+    "transcription_extension": ".bekrn"
+  },
+  "split_statistics": {
+    "test": {
+      "cache_height": {
+        "count": 7661,
+        "max": 2591,
+        "mean": 784.92,
+        "median": 726,
+        "min": 156,
+        "p25": 590,
+        "p75": 919,
+        "p95": 1341
+      },
+      "cache_width": {
+        "count": 7661,
+        "max": 256,
+        "mean": 256.0,
+        "median": 256,
+        "min": 255,
+        "p25": 256,
+        "p75": 256,
+        "p95": 256
+      },
+      "cached_npy": 7661,
+      "characters": {
+        "count": 7661,
+        "max": 2732,
+        "mean": 626.32,
+        "median": 565,
+        "min": 96,
+        "p25": 435,
+        "p75": 747,
+        "p95": 1162
+      },
+      "clean_jpg": 7661,
+      "ctc_input_length": {
+        "count": 7661,
+        "max": 5152,
+        "mean": 1554.59,
+        "median": 1440,
+        "min": 288,
+        "p25": 1152,
+        "p75": 1824,
+        "p95": 2656
+      },
+      "ctc_margin": {
+        "count": 7661,
+        "max": 4175,
+        "mean": 1187.52,
+        "median": 1101,
+        "min": 248,
+        "p25": 869,
+        "p75": 1402,
+        "p95": 2069
+      },
+      "distorted_jpg": 7661,
+      "line_breaks": {
+        "count": 7661,
+        "max": 155,
+        "mean": 47.5,
+        "median": 43,
+        "min": 8,
+        "p25": 34,
+        "p75": 57,
+        "p95": 85
+      },
+      "missing_cache": 0,
+      "missing_clean_jpg": 0,
+      "missing_transcriptions": 0,
+      "samples": 7661,
+      "token_length": {
+        "count": 7661,
+        "max": 1412,
+        "mean": 367.06,
+        "median": 338,
+        "min": 36,
+        "p25": 257,
+        "p75": 438,
+        "p95": 672
+      },
+      "total_tokens": 2812074,
+      "transcriptions": 7661,
+      "vocab_size": 179
+    },
+    "train": {
+      "cache_height": {
+        "count": 41598,
+        "max": 2945,
+        "mean": 782.74,
+        "median": 723,
+        "min": 143,
+        "p25": 588,
+        "p75": 910,
+        "p95": 1352
+      },
+      "cache_width": {
+        "count": 41598,
+        "max": 256,
+        "mean": 256.0,
+        "median": 256,
+        "min": 255,
+        "p25": 256,
+        "p75": 256,
+        "p95": 256
+      },
+      "cached_npy": 41598,
+      "characters": {
+        "count": 41598,
+        "max": 3264,
+        "mean": 635.83,
+        "median": 570,
+        "min": 92,
+        "p25": 438,
+        "p75": 764,
+        "p95": 1187
+      },
+      "clean_jpg": 41598,
+      "ctc_input_length": {
+        "count": 41598,
+        "max": 5888,
+        "mean": 1550.51,
+        "median": 1440,
+        "min": 256,
+        "p25": 1152,
+        "p75": 1792,
+        "p95": 2688
+      },
+      "ctc_margin": {
+        "count": 41598,
+        "max": 4737,
+        "mean": 1182.96,
+        "median": 1090,
+        "min": 195,
+        "p25": 869,
+        "p75": 1394,
+        "p95": 2078
+      },
+      "distorted_jpg": 41598,
+      "line_breaks": {
+        "count": 41598,
+        "max": 209,
+        "mean": 46.82,
+        "median": 42,
+        "min": 8,
+        "p25": 34,
+        "p75": 55,
+        "p95": 85
+      },
+      "missing_cache": 0,
+      "missing_clean_jpg": 0,
+      "missing_transcriptions": 0,
+      "samples": 41598,
+      "token_length": {
+        "count": 41598,
+        "max": 1716,
+        "mean": 367.55,
+        "median": 333,
+        "min": 34,
+        "p25": 254,
+        "p75": 443,
+        "p95": 684
+      },
+      "total_tokens": 15289285,
+      "transcriptions": 41598,
+      "vocab_size": 185
+    },
+    "val": {
+      "cache_height": {
+        "count": 4623,
+        "max": 3056,
+        "mean": 787.6,
+        "median": 730,
+        "min": 167,
+        "p25": 589.5,
+        "p75": 916.5,
+        "p95": 1354.6
+      },
+      "cache_width": {
+        "count": 4623,
+        "max": 256,
+        "mean": 256.0,
+        "median": 256,
+        "min": 255,
+        "p25": 256,
+        "p75": 256,
+        "p95": 256
+      },
+      "cached_npy": 4623,
+      "characters": {
+        "count": 4623,
+        "max": 3267,
+        "mean": 636.88,
+        "median": 572,
+        "min": 91,
+        "p25": 441,
+        "p75": 763,
+        "p95": 1181.9
+      },
+      "clean_jpg": 4623,
+      "ctc_input_length": {
+        "count": 4623,
+        "max": 6112,
+        "mean": 1560.02,
+        "median": 1440,
+        "min": 320,
+        "p25": 1152,
+        "p75": 1824,
+        "p95": 2688
+      },
+      "ctc_margin": {
+        "count": 4623,
+        "max": 4830,
+        "mean": 1191.23,
+        "median": 1095,
+        "min": 244,
+        "p25": 876,
+        "p75": 1402,
+        "p95": 2083.9
+      },
+      "distorted_jpg": 4623,
+      "line_breaks": {
+        "count": 4623,
+        "max": 186,
+        "mean": 47.12,
+        "median": 43,
+        "min": 8,
+        "p25": 34,
+        "p75": 56,
+        "p95": 85
+      },
+      "missing_cache": 0,
+      "missing_clean_jpg": 0,
+      "missing_transcriptions": 0,
+      "samples": 4623,
+      "token_length": {
+        "count": 4623,
+        "max": 1676,
+        "mean": 368.79,
+        "median": 335,
+        "min": 35,
+        "p25": 257,
+        "p75": 442.5,
+        "p95": 683.8
+      },
+      "total_tokens": 1704915,
+      "transcriptions": 4623,
+      "vocab_size": 170
+    }
+  },
+  "top_tokens": [
+    {
+      "count": 3198544,
+      "display_token": "<t>",
+      "rank": 1,
+      "test_count": 461092,
+      "token": "<t>",
+      "train_count": 2462946,
+      "val_count": 274506
+    },
+    {
+      "count": 2529454,
+      "display_token": "<b>",
+      "rank": 2,
+      "test_count": 363921,
+      "token": "<b>",
+      "train_count": 1947686,
+      "val_count": 217847
+    },
+    {
+      "count": 1452856,
+      "display_token": ".",
+      "rank": 3,
+      "test_count": 209777,
+      "token": ".",
+      "train_count": 1116654,
+      "val_count": 126425
+    },
+    {
+      "count": 1337595,
+      "display_token": "8",
+      "rank": 4,
+      "test_count": 192206,
+      "token": "8",
+      "train_count": 1032619,
+      "val_count": 112770
+    },
+    {
+      "count": 1001659,
+      "display_token": "16",
+      "rank": 5,
+      "test_count": 143797,
+      "token": "16",
+      "train_count": 773616,
+      "val_count": 84246
+    },
+    {
+      "count": 851566,
+      "display_token": "-",
+      "rank": 6,
+      "test_count": 95813,
+      "token": "-",
+      "train_count": 679659,
+      "val_count": 76094
+    },
+    {
+      "count": 820827,
+      "display_token": "4",
+      "rank": 7,
+      "test_count": 119045,
+      "token": "4",
+      "train_count": 629639,
+      "val_count": 72143
+    },
+    {
+      "count": 760879,
+      "display_token": "<s>",
+      "rank": 8,
+      "test_count": 109686,
+      "token": "<s>",
+      "train_count": 585742,
+      "val_count": 65451
+    },
+    {
+      "count": 691699,
+      "display_token": "#",
+      "rank": 9,
+      "test_count": 72429,
+      "token": "#",
+      "train_count": 558538,
+      "val_count": 60732
+    },
+    {
+      "count": 542179,
+      "display_token": "=",
+      "rank": 10,
+      "test_count": 78201,
+      "token": "=",
+      "train_count": 417278,
+      "val_count": 46700
+    },
+    {
+      "count": 329964,
+      "display_token": "L",
+      "rank": 11,
+      "test_count": 47545,
+      "token": "L",
+      "train_count": 253945,
+      "val_count": 28474
+    },
+    {
+      "count": 293947,
+      "display_token": "J",
+      "rank": 12,
+      "test_count": 42271,
+      "token": "J",
+      "train_count": 226485,
+      "val_count": 25191
+    },
+    {
+      "count": 272660,
+      "display_token": "r",
+      "rank": 13,
+      "test_count": 39767,
+      "token": "r",
+      "train_count": 209773,
+      "val_count": 23120
+    },
+    {
+      "count": 228196,
+      "display_token": "JJ",
+      "rank": 14,
+      "test_count": 32781,
+      "token": "JJ",
+      "train_count": 176232,
+      "val_count": 19183
+    },
+    {
+      "count": 226925,
+      "display_token": "LL",
+      "rank": 15,
+      "test_count": 32524,
+      "token": "LL",
+      "train_count": 175391,
+      "val_count": 19010
+    },
+    {
+      "count": 166090,
+      "display_token": "e",
+      "rank": 16,
+      "test_count": 25311,
+      "token": "e",
+      "train_count": 126402,
+      "val_count": 14377
+    },
+    {
+      "count": 165808,
+      "display_token": "c",
+      "rank": 17,
+      "test_count": 23814,
+      "token": "c",
+      "train_count": 127924,
+      "val_count": 14070
+    },
+    {
+      "count": 165684,
+      "display_token": "g",
+      "rank": 18,
+      "test_count": 23985,
+      "token": "g",
+      "train_count": 127627,
+      "val_count": 14072
+    },
+    {
+      "count": 165015,
+      "display_token": "d",
+      "rank": 19,
+      "test_count": 24342,
+      "token": "d",
+      "train_count": 126509,
+      "val_count": 14164
+    },
+    {
+      "count": 164532,
+      "display_token": "f",
+      "rank": 20,
+      "test_count": 22493,
+      "token": "f",
+      "train_count": 127837,
+      "val_count": 14202
+    },
+    {
+      "count": 163421,
+      "display_token": "b",
+      "rank": 21,
+      "test_count": 23728,
+      "token": "b",
+      "train_count": 125530,
+      "val_count": 14163
+    },
+    {
+      "count": 162808,
+      "display_token": "B",
+      "rank": 22,
+      "test_count": 23942,
+      "token": "B",
+      "train_count": 124544,
+      "val_count": 14322
+    },
+    {
+      "count": 162682,
+      "display_token": "a",
+      "rank": 23,
+      "test_count": 22835,
+      "token": "a",
+      "train_count": 126173,
+      "val_count": 13674
+    },
+    {
+      "count": 158735,
+      "display_token": "cc",
+      "rank": 24,
+      "test_count": 24503,
+      "token": "cc",
+      "train_count": 120983,
+      "val_count": 13249
+    },
+    {
+      "count": 153028,
+      "display_token": "dd",
+      "rank": 25,
+      "test_count": 23139,
+      "token": "dd",
+      "train_count": 116937,
+      "val_count": 12952
+    }
+  ],
+  "total_statistics": {
+    "cache_height": {
+      "count": 53882,
+      "max": 3056,
+      "mean": 783.47,
+      "median": 724,
+      "min": 143,
+      "p25": 589,
+      "p75": 911,
+      "p95": 1351
+    },
+    "cache_width": {
+      "count": 53882,
+      "max": 256,
+      "mean": 256.0,
+      "median": 256,
+      "min": 255,
+      "p25": 256,
+      "p75": 256,
+      "p95": 256
+    },
+    "cached_npy": 53882,
+    "characters": {
+      "count": 53882,
+      "max": 3267,
+      "mean": 634.57,
+      "median": 569,
+      "min": 91,
+      "p25": 438,
+      "p75": 761,
+      "p95": 1183
+    },
+    "clean_jpg": 53882,
+    "ctc_input_length": {
+      "count": 53882,
+      "max": 6112,
+      "mean": 1551.9,
+      "median": 1440,
+      "min": 256,
+      "p25": 1152,
+      "p75": 1792,
+      "p95": 2688
+    },
+    "ctc_margin": {
+      "count": 53882,
+      "max": 4830,
+      "mean": 1184.32,
+      "median": 1092,
+      "min": 195,
+      "p25": 870,
+      "p75": 1396,
+      "p95": 2077
+    },
+    "distorted_jpg": 53882,
+    "line_breaks": {
+      "count": 53882,
+      "max": 209,
+      "mean": 46.94,
+      "median": 43,
+      "min": 8,
+      "p25": 34,
+      "p75": 55,
+      "p95": 85
+    },
+    "missing_cache": 0,
+    "missing_clean_jpg": 0,
+    "missing_transcriptions": 0,
+    "samples": 53882,
+    "token_length": {
+      "count": 53882,
+      "max": 1716,
+      "mean": 367.59,
+      "median": 334,
+      "min": 34,
+      "p25": 255,
+      "p75": 442,
+      "p95": 682
+    },
+    "total_tokens": 19806274,
+    "transcriptions": 53882,
+    "vocab_size": 187
+  }
+}
