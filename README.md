@@ -330,10 +330,6 @@ The composer panel shows the local GrandStaff composer coverage. Beethoven has t
 
 The examples panel shows raw score images beside their cached model inputs.
 
-![Preprocessing pipeline](outputs/visualiser/data_preprocessing/preprocessing_pipeline.png)
-
-The pipeline panel summarizes the transformation from partition entry to transcription tokens and cached model image.
-
 ### Training Curves
 
 These panels are generated from the real CRNN and CNNT training logs.
